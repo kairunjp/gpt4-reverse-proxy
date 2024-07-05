@@ -3,29 +3,56 @@ const bodyParser = require("body-parser");
 const fetch = require('node-fetch');
 const app = express();
 const port = 35803;
+// const { SocksProxyAgent } = require('socks-proxy-agent');
+let token, device_id = Array.from({ length: 15 }, () => "0123456789ABCDEF".charAt(Math.floor(Math.random() * 16))).join('');
+const valcanid = "9149487891715698987934";
+const appver = "3.6.2", protocolver = 548;
+// const agent_proxy = new SocksProxyAgent("socks5://127.0.0.1:8085");
+// fetch("http://httpbin.org/ip")
+//     .then(response => response.json())
+//     .then(data => console.log("Your IP: " + data.origin))
+//     .catch(error => console.error("Error fetching the IP info:", error));
 
-const crypto = require('crypto');
-
-function generateRandomToken() {
-    const header = {
-        alg: "HS256",
-        typ: "JWT"
-    };
-
-    const payload = {
-        token: "admin",
-        exp: Math.floor(Date.now() / 1000) + (60 * 60), // 1 hour expiration
-        user_id: "1715801083.523478_8ED31140-E280-44EE-9DE9-1221170D3F41"
-    };
-
-    const base64urlHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
-    const base64urlPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-
-    const signature = crypto.randomBytes(32).toString('base64url');
-
-    return `${base64urlHeader}.${base64urlPayload}.${signature}`;
+async function refleshtoken() {
+    fetch("https://chatgpt-au.vulcanlabs.co/api/v1/token", {
+        method: 'POST',
+        agent: agent_proxy,
+        headers: {
+            'Host': 'chatgpt-au.vulcanlabs.co',
+            'X-Vulcan-Application-Id': 'com.smartwidgetlabs.chatgpt',
+            'Accept': 'application/json',
+            'User-Agent': `Chat Smith Android, Version ${appver}(${protocolver})`,
+            'X-Vulcan-Request-Id': valcanid,
+            'Content-Type': 'application/json; charset=utf-8',
+            'Accept-Encoding': 'gzip'
+        },
+        body: JSON.stringify({
+            "device_id": device_id,
+            "order_id": "",
+            "product_id": "",
+            "purchase_token": "",
+            "subscription_id": ""
+        })
+    }).then(response => {
+        console.log("TOKEN LOGIN Done", response.status)
+        if (!response.ok) return console.log("JSONエラー")
+        return response.json()
+    }).then(
+        data => {
+            token = data.AccessToken;
+            setTimeout(() => {
+                refleshtoken();
+            }, 1 * 1000 * 60 * 60);
+        }
+    ).catch(error => {
+        console.error('Error:', error)
+        setTimeout(() => {
+            refleshtoken();
+        }, 5000);
+    });
 }
 
+refleshtoken();
 
 app.use((req, res, next) => {
     res.setHeader("X-Powered-By", "php")
@@ -33,67 +60,60 @@ app.use((req, res, next) => {
 })
 
 app.use(bodyParser.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.get("/robots.txt", (req, res) => {
     res.sendFile(__dirname + "/robots.txt");
 })
 
-app.get("/", (req, res) => {
-    if (req.query.text)
-        fetch("https://prod-smith.vulcanlabs.co/api/v7/chat_ios", {
+app.post("/generate", async (req, res) => {
+    if (Array.isArray(req.body["messages"])) {
+        let messages = []
+
+        if (req.headers["accept-language"]) messages.push({
+            content: `Please answer in ${req.headers["accept-language"]} language`,
+            role: "system"
+        });
+
+        let images = []
+
+        for (const msg of req.body["messages"])
+            messages.push(msg)
+
+        if (Array.isArray(req.body["images"])) {
+            for (const image of req.body["images"])
+                images.push(image)
+        }
+        const curl = await fetch("https://prod-smith.vulcanlabs.co/api/v6/chat", {
             method: 'POST',
+            // agent: agent_proxy,
             headers: {
-                'User-Agent': 'iOS App, Version 6.9.1',
+                'Host': 'prod-smith.vulcanlabs.co',
+                'X-Vulcan-Application-Id': 'com.smartwidgetlabs.chatgpt',
                 'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'accept-language': 'ja-JP,ja;q=0.9',
-                'x-firebase-appcheck-error': 'The%20operation%20couldn%E2%80%99t%20be%20completed.%20(com.firebase.appCheck%20error%200.)',
-                'authorization': `Bearer ${generateRandomToken()}`
+                'User-Agent': `Chat Smith Android, Version ${appver}(${protocolver})`,
+                'X-Vulcan-Request-Id': valcanid,
+                'Content-Type': 'application/json; charset=utf-8',
+                'Accept-Encoding': 'gzip',
+                'authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
-                messages: [
-                    {
-                        content: 'あなたの名前は"かいるんAI"です。あなたの性格はメンヘラ女子高校生でお願いします。一人称の呼び方は"かいるんAI"でお願いします。',
-                        role: "system"
-                    },
-                    {
-                        content: req.query.text,
-                        role: "user"
-                    }
-                ],
-                functions: [
-                    {
-                        name: "create_ai_art",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                prompt: {
-                                    type: "string",
-                                    description: "The prompt to create art"
-                                }
-                            }
-                        },
-                        description: "Return this only if the user wants to create a photo or art. Depending on the what user want to create, generate a prompt for them by describing the image in great detail. Ensure conciseness by breaking down every detail with commas. Prompt word is never longer than 25 words."
-                    }
-                ],
-                model: "gpt-4",
+                messages,
+                images,
+                model: "gpt-4-vision-preview",
                 nsfw_check: false,
-                max_tokens: null,
-                user: "1715801083.523478_8ED31140-E280-44EE-9DE9-1221170D3F41"
+                stream: false,
+                temperature: 1,
+                max_tokens: 2000,
+                user: device_id
             })
-        }).then(response =>
-            response.json()
-        ).then(
-            data => {
-                console.log(data)
-                res.json(data)
-            }
-        ).catch(error => {
-            console.log(`Bearer ${generateRandomToken()}`)
-            console.error('Error:', error)
-        }
-        );
+        })
+        if (!curl.ok) return res.send("JSONエラー")
+        const json = await curl.json()
+        messages.push(json.choices[0]?.Message)
+        res.json(messages)
+    }
+    else return res.sendStatus(400);
 });
 
 app.listen(port, () => {
